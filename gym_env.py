@@ -21,7 +21,7 @@ from attrdict import AttrDict
 
 ROBOT_URDF_PATH = "./ur_e_description/urdf/ur5e.urdf"
 TABLE_URDF_PATH = os.path.join(pybullet_data.getDataPath(), "table/table.urdf")
-# CUBE_URDF_PATH = os.path.join(pybullet_data.getDataPath(), "cube_small.urdf")
+CUBE_URDF_PATH = os.path.join(pybullet_data.getDataPath(), "cube_small.urdf")
 
 # x,y,z distance
 def goal_distance(goal_a, goal_b):
@@ -50,20 +50,25 @@ class ur5GymEnv(gym.Env):
 
         self.renders = renders
         self.actionRepeat = actionRepeat
+
+        # setup pybullet sim:
         if self.renders:
             pybullet.connect(pybullet.GUI)
         else:
             pybullet.connect(pybullet.DIRECT)
 
         pybullet.setTimeStep(1./240.)
-        # pybullet.setGravity(0,0,-10)
+        pybullet.setGravity(0,0,-10)
         pybullet.setRealTimeSimulation(False)
+        # pybullet.configureDebugVisualizer(pybullet.COV_ENABLE_WIREFRAME,1)
         pybullet.resetDebugVisualizerCamera( cameraDistance=1.5, cameraYaw=60, cameraPitch=-30, cameraTargetPosition=[0,0,0])
         
+        # setup robot arm:
         self.end_effector_index = 7
-        self.ur5 = self.load_robot()
+        self.table = pybullet.loadURDF(TABLE_URDF_PATH, [0.5, 0, -0.6300], [0, 0, 0, 1])
+        flags = pybullet.URDF_USE_SELF_COLLISION
+        self.ur5 = pybullet.loadURDF(ROBOT_URDF_PATH, [0, 0, 0], [0, 0, 0, 1], flags=flags)
         self.num_joints = pybullet.getNumJoints(self.ur5)
-        
         self.control_joints = ["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint", "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"]
         self.joint_type_list = ["REVOLUTE", "PRISMATIC", "SPHERICAL", "PLANAR", "FIXED"]
         self.joint_info = namedtuple("jointInfo", ["id", "name", "type", "lowerLimit", "upperLimit", "maxForce", "maxVelocity", "controllable"])
@@ -85,14 +90,14 @@ class ur5GymEnv(gym.Env):
             self.joints[info.name] = info
 
         # object:
-        self.goal = [0.8, 0.1, 0.5]
-        # self.obj = pybullet.loadURDF(CUBE_URDF_PATH, self.goal) 
+        self.initial_obj_pos = [0.8, 0.1, 0.0] # initial object pos
+        self.obj = pybullet.loadURDF(CUBE_URDF_PATH, self.initial_obj_pos)
 
         self.name = 'ur5GymEnv'
         self.simulatedGripper = simulatedGripper
         self.action_dim = 4
-        self._envStepCounter = 0
-        self._max_episode_steps = maxSteps
+        self.stepCounter = 0
+        self.maxSteps = maxSteps
         self.terminated = False
         self.randObjPos = randObjPos
         self.observation = np.array(0)
@@ -106,12 +111,6 @@ class ur5GymEnv(gym.Env):
         self.reset()
         high = np.array([10]*self.observation.shape[0])
         self.observation_space = spaces.Box(-high, high, dtype='float32')
-
-    def load_robot(self):
-        flags = pybullet.URDF_USE_SELF_COLLISION
-        table = pybullet.loadURDF(TABLE_URDF_PATH, [0.5, 0, -0.6300], [0, 0, 0, 1])
-        robot = pybullet.loadURDF(ROBOT_URDF_PATH, [0, 0, 0], [0, 0, 0, 1], flags=flags)
-        return robot
 
     def set_joint_angles(self, joint_angles):
         poses = []
@@ -129,7 +128,8 @@ class ur5GymEnv(gym.Env):
             pybullet.POSITION_CONTROL,
             targetPositions=joint_angles,
             targetVelocities=[0]*len(poses),
-            positionGains=[0.04]*len(poses), forces=forces
+            positionGains=[0.04]*len(poses),
+            forces=forces
         )
 
     def get_joint_angles(self):
@@ -169,10 +169,13 @@ class ur5GymEnv(gym.Env):
 
 
     def reset(self):
-        self._envStepCounter = 0
+        self.stepCounter = 0
         self.terminated = False
 
-        pybullet.addUserDebugText('X', self.goal, [0,1,0], 1) # display goal
+        # pybullet.addUserDebugText('X', self.obj_pos, [0,1,0], 1) # display goal
+        # if self.randObjPos:
+        # self.initial_obj_pos = [0.6+random.random()*0.1, 0.1+random.random()*0.1, 0.0]
+        pybullet.resetBasePositionAndOrientation(self.obj, self.initial_obj_pos, [0.,0.,0.,1.0]) # reset object pos
 
         # reset robot simulation and position:
         joint_angles = self.calculate_ik([0.5, 0, 0.6], [0, 0, 0]) # X,YZ and angles set to zero
@@ -181,7 +184,6 @@ class ur5GymEnv(gym.Env):
         # step simualator:
         for i in range(100):
             pybullet.stepSimulation()
-            # time.sleep(1./240.)
 
         # get obs and return:
         self.getExtendedObservation()
@@ -198,7 +200,7 @@ class ur5GymEnv(gym.Env):
         # add delta position:
         new_p = np.array(cur_p[0]) + arm_action
         # actuate: 
-        joint_angles = self.calculate_ik(new_p, [0, 0, 0]) # XYZ and angles set to zero
+        joint_angles = self.calculate_ik(new_p, [0, math.pi/2, 0]) # XYZ and angles set to zero
         self.set_joint_angles(joint_angles)
         
         # step simualator:
@@ -214,7 +216,7 @@ class ur5GymEnv(gym.Env):
         if self.terminated == self.task:
             info['is_success'] = True
 
-        self._envStepCounter += 1
+        self.stepCounter += 1
 
         return self.observation, reward, done, info
 
@@ -225,8 +227,9 @@ class ur5GymEnv(gym.Env):
         #TBD
 
         tool_pos = self.get_current_pose()[0] # XYZ, no angles
-        objects_pos = self.goal        
-        goal_pos = self.goal
+        self.obj_pos,_ = pybullet.getBasePositionAndOrientation(self.obj)
+        objects_pos = self.obj_pos       
+        goal_pos = self.obj_pos
 
         self.observation = np.array(np.concatenate((tool_pos, objects_pos)))
         self.achieved_goal = np.array(np.concatenate((objects_pos, tool_pos)))
@@ -235,17 +238,17 @@ class ur5GymEnv(gym.Env):
 
     def my_task_done(self):
         # NOTE: need to call compute_reward before this to check termination!
-        c = (self.terminated == True or self._envStepCounter > self._max_episode_steps)
+        c = (self.terminated == True or self.stepCounter > self.maxSteps)
         return c
 
 
     def compute_reward(self, achieved_goal, desired_goal, info):
         reward = np.zeros(1)
  
-        grip_trans = achieved_goal[-3:]
+        grip_pos = achieved_goal[-3:]
             
-        self.target_dist = goal_distance(grip_trans, desired_goal)
-        # print(grip_trans, desired_goal, self.target_dist)
+        self.target_dist = goal_distance(grip_pos, desired_goal)
+        # print(grip_pos, desired_goal, self.target_dist)
 
         # check approach velocity:
         # tv = self.tool.getVelocity()
