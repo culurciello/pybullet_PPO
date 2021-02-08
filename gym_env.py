@@ -128,7 +128,7 @@ class ur5GymEnv(gym.Env):
             pybullet.POSITION_CONTROL,
             targetPositions=joint_angles,
             targetVelocities=[0]*len(poses),
-            positionGains=[0.04]*len(poses),
+            positionGains=[0.05]*len(poses),
             forces=forces
         )
 
@@ -148,10 +148,13 @@ class ur5GymEnv(gym.Env):
 
     def calculate_ik(self, position, orientation):
         quaternion = pybullet.getQuaternionFromEuler(orientation)
+        # print(quaternion)
+        # quaternion = (0,1,0,1)
         lower_limits = [-math.pi]*6
         upper_limits = [math.pi]*6
         joint_ranges = [2*math.pi]*6
-        rest_poses = [0, -math.pi/2, -math.pi/2, -math.pi/2, -math.pi/2, 0]
+        # rest_poses = [0, -math.pi/2, -math.pi/2, -math.pi/2, -math.pi/2, 0]
+        rest_poses = [(-0.34, -1.57, 1.80, -1.57, -1.57, 0.00)] # rest pose of our ur5 robot
 
         joint_angles = pybullet.calculateInverseKinematics(
             self.ur5, self.end_effector_index, position, quaternion, 
@@ -171,6 +174,7 @@ class ur5GymEnv(gym.Env):
     def reset(self):
         self.stepCounter = 0
         self.terminated = False
+        self.ur5_or = [0.0, 1/2*math.pi, 0.0]
 
         # pybullet.addUserDebugText('X', self.obj_pos, [0,1,0], 1) # display goal
         # if self.randObjPos:
@@ -178,7 +182,7 @@ class ur5GymEnv(gym.Env):
         pybullet.resetBasePositionAndOrientation(self.obj, self.initial_obj_pos, [0.,0.,0.,1.0]) # reset object pos
 
         # reset robot simulation and position:
-        joint_angles = self.calculate_ik([0.5, 0, 0.6], [0, 0, 0]) # X,YZ and angles set to zero
+        joint_angles = (-0.34, -1.57, 1.80, -1.57, -1.57, 0.00) # pi/2 = 1.5707
         self.set_joint_angles(joint_angles)
 
         # step simualator:
@@ -200,7 +204,7 @@ class ur5GymEnv(gym.Env):
         # add delta position:
         new_p = np.array(cur_p[0]) + arm_action
         # actuate: 
-        joint_angles = self.calculate_ik(new_p, [0, math.pi/2, 0]) # XYZ and angles set to zero
+        joint_angles = self.calculate_ik(new_p, self.ur5_or) # XYZ and angles set to zero
         self.set_joint_angles(joint_angles)
         
         # step simualator:
@@ -224,7 +228,7 @@ class ur5GymEnv(gym.Env):
     # observations are: arm (tip/tool) position, arm acceleration, ...
     def getExtendedObservation(self):
         # sensor values:
-        #TBD
+        # js = self.get_joint_angles()
 
         tool_pos = self.get_current_pose()[0] # XYZ, no angles
         self.obj_pos,_ = pybullet.getBasePositionAndOrientation(self.obj)

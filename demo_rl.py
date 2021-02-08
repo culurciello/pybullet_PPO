@@ -72,6 +72,7 @@ for ep in range(1, args.n_episodes+1):
         ep_reward += reward
 
         # print(t, env.target_dist)
+        # input()
  
         if done:
             break
